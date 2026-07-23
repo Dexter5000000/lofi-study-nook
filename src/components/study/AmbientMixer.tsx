@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { CloudRain, Flame, Wind, Coffee, Waves, TreePine, Volume2 } from "lucide-react";
-import { setSoundVolume, stopAllSounds, type SoundKind } from "@/lib/ambient-audio";
+import { CloudRain, Flame, Wind, Coffee, Waves, TreePine, Volume2, VolumeX } from "lucide-react";
+import { setSoundVolume, stopAllSounds, unlockSounds, type SoundKind } from "@/lib/ambient-audio";
 
 const SOUNDS: { kind: SoundKind; label: string; Icon: typeof CloudRain }[] = [
   { kind: "rain", label: "Rain", Icon: CloudRain },
@@ -20,6 +20,8 @@ export function AmbientMixer() {
     waves: 0,
     forest: 0,
   });
+  const [unlocked, setUnlocked] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
 
   useEffect(() => {
     return () => stopAllSounds();
@@ -27,7 +29,28 @@ export function AmbientMixer() {
 
   const update = (kind: SoundKind, value: number) => {
     setLevels((prev) => ({ ...prev, [kind]: value }));
-    setSoundVolume(kind, value);
+    if (unlocked) {
+      setSoundVolume(kind, value);
+    }
+  };
+
+  const handleUnlock = async () => {
+    setUnlocking(true);
+    try {
+      await unlockSounds();
+      setUnlocked(true);
+      // Apply current slider values now that audio is allowed.
+      (Object.keys(levels) as SoundKind[]).forEach((kind) => {
+        setSoundVolume(kind, levels[kind]);
+      });
+    } finally {
+      setUnlocking(false);
+    }
+  };
+
+  const silenceAll = () => {
+    stopAllSounds();
+    setLevels({ rain: 0, fire: 0, wind: 0, cafe: 0, waves: 0, forest: 0 });
   };
 
   return (
@@ -39,7 +62,23 @@ export function AmbientMixer() {
       <p className="mb-4 text-xs text-muted-foreground">
         Layer real field recordings — mix rain, fire, cafe and more.
       </p>
-      <div className="grid grid-cols-2 gap-3">
+
+      {!unlocked && (
+        <div className="mb-4 rounded-xl border border-dashed border-border bg-muted/50 p-4 text-center">
+          <p className="mb-2 text-sm text-muted-foreground">
+            Browser autoplay policy blocks sounds until you interact.
+          </p>
+          <button
+            onClick={handleUnlock}
+            disabled={unlocking}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
+          >
+            {unlocking ? "Enabling…" : "Enable ambient sounds"}
+          </button>
+        </div>
+      )}
+
+      <div className={`grid grid-cols-2 gap-3 ${!unlocked ? "pointer-events-none opacity-50" : ""}`}>
         {SOUNDS.map(({ kind, label, Icon }) => (
           <div key={kind} className="rounded-xl bg-muted/50 p-3">
             <div className="mb-2 flex items-center justify-between">
@@ -64,13 +103,12 @@ export function AmbientMixer() {
           </div>
         ))}
       </div>
+
       <button
-        onClick={() => {
-          stopAllSounds();
-          setLevels({ rain: 0, fire: 0, wind: 0, cafe: 0, waves: 0, forest: 0 });
-        }}
-        className="mt-4 w-full rounded-lg border border-border py-2 text-sm transition hover:bg-muted"
+        onClick={silenceAll}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-border py-2 text-sm transition hover:bg-muted"
       >
+        <VolumeX className="h-4 w-4" />
         Silence all
       </button>
     </div>
