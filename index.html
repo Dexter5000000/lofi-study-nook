@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lofi Study Nook</title>
+    <meta
+      name="description"
+      content="A cozy study dashboard with lofi radio, ambient sound mixer, YouTube player, pomodoro, doodle pad and boredom busters."
+    />
+    <meta property="og:title" content="Lofi Study Nook" />
+    <meta
+      property="og:description"
+      content="Lofi radio, ambient sounds, pomodoro, doodle pad and other tiny tools for focus and productive procrastination."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+    <script>
+      try {
+        var t = localStorage.getItem("study-nook-theme") || "jdm";
+        document.documentElement.classList.add("theme-" + t);
+      } catch (e) {
+        document.documentElement.classList.add("theme-jdm");
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
