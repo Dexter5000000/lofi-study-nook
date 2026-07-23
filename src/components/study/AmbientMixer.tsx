@@ -49,7 +49,9 @@ export function AmbientMixer() {
   };
 
   const silenceAll = () => {
-    stopAllSounds();
+    (Object.keys(levels) as SoundKind[]).forEach((kind) => {
+      setSoundVolume(kind, 0);
+    });
     setLevels({ rain: 0, fire: 0, wind: 0, cafe: 0, waves: 0, forest: 0 });
   };
 

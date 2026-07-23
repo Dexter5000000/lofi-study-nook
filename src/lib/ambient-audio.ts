@@ -9,16 +9,38 @@ const URLS: Record<SoundKind, string> = {
   forest: "/sounds/forest.mp3",
 };
 
-const players: Partial<Record<SoundKind, HTMLAudioElement>> = {};
-let unlocked = false;
+interface SoundNode {
+  buffer: AudioBuffer;
+  gain: GainNode;
+  source: AudioBufferSourceNode;
+}
 
-function createPlayer(kind: SoundKind): HTMLAudioElement {
-  const el = new Audio(URLS[kind]);
-  el.loop = true;
-  el.preload = "auto";
-  el.volume = 0;
-  players[kind] = el;
-  return el;
+let ctx: AudioContext | null = null;
+const nodes: Partial<Record<SoundKind, SoundNode>> = {};
+let unlocked = false;
+let unlocking = false;
+
+function clamp(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function createContext(): AudioContext {
+  const Ctx = (window as typeof window & { webkitAudioContext?: typeof AudioContext }).AudioContext ??
+    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) {
+    throw new Error("Web Audio API is not supported in this browser.");
+  }
+  return new Ctx();
+}
+
+async function fetchAndDecode(kind: SoundKind): Promise<AudioBuffer> {
+  const response = await fetch(URLS[kind]);
+  if (!response.ok) {
+    throw new Error(`Failed to load ${URLS[kind]}: ${response.status} ${response.statusText}`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  if (!ctx) throw new Error("AudioContext is not available.");
+  return ctx.decodeAudioData(arrayBuffer);
 }
 
 export function isUnlocked(): boolean {
@@ -27,60 +49,92 @@ export function isUnlocked(): boolean {
 
 export async function unlockSounds(): Promise<void> {
   if (unlocked) return;
-
-  // Create all players first so they exist.
-  const all = (Object.keys(URLS) as SoundKind[]).map((kind) => {
-    const el = players[kind] ?? createPlayer(kind);
-    return { kind, el };
-  });
-
-  // Unlock each audio element by playing it muted. This must be called from
-  // within a user gesture handler (e.g. a button click) to satisfy the browser
-  // autoplay policy.
-  await Promise.all(
-    all.map(async ({ el }) => {
-      try {
-        el.muted = true;
-        await el.play();
-      } catch {
-        // Ignore autoplay denial; we'll retry when the user interacts again.
-      }
-    })
-  );
-
-  unlocked = true;
-
-  // Reset state: keep all sounds paused and at zero volume. The UI will call
-  // setSoundVolume with the current slider values right after unlocking.
-  for (const { el } of all) {
-    el.muted = false;
-    el.volume = 0;
-    el.pause();
+  if (unlocking) {
+    // Wait for an in-progress unlock to finish.
+    while (unlocking) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return;
   }
-}
 
-export function getPlayer(kind: SoundKind): HTMLAudioElement {
-  return players[kind] ?? createPlayer(kind);
+  unlocking = true;
+  try {
+    ctx = createContext();
+    // resume() must be triggered inside a user gesture; calling it here is the
+    // whole point of the unlock button.
+    await ctx.resume();
+
+    const kinds = Object.keys(URLS) as SoundKind[];
+    const buffers = await Promise.all(
+      kinds.map(async (kind) => {
+        try {
+          const buffer = await fetchAndDecode(kind);
+          return { kind, buffer } as const;
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error(`Ambient sound "${kind}" could not be loaded.`, error);
+          return { kind, buffer: null as unknown as AudioBuffer };
+        }
+      })
+    );
+
+    for (const { kind, buffer } of buffers) {
+      if (!buffer) continue;
+      if (!ctx) continue;
+
+      const gain = ctx.createGain();
+      gain.connect(ctx.destination);
+      gain.gain.value = 0;
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.connect(gain);
+      source.start(0);
+
+      nodes[kind] = { buffer, gain, source };
+    }
+
+    unlocked = true;
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Failed to unlock ambient sounds.", error);
+    throw error;
+  } finally {
+    unlocking = false;
+  }
 }
 
 export function setSoundVolume(kind: SoundKind, value: number) {
-  const el = getPlayer(kind);
-  const v = Math.max(0, Math.min(1, value));
-  el.volume = v;
-  if (v > 0) {
-    if (el.paused) el.play().catch(() => {});
-  } else {
-    el.pause();
-  }
+  if (!unlocked || !ctx) return;
+  const node = nodes[kind];
+  if (!node) return;
+  node.gain.gain.value = clamp(value);
 }
 
 export function stopAllSounds() {
-  (Object.keys(players) as SoundKind[]).forEach((k) => {
-    const el = players[k];
-    if (el) {
-      el.pause();
-      el.currentTime = 0;
-      el.volume = 0;
+  for (const kind of Object.keys(nodes) as SoundKind[]) {
+    const node = nodes[kind];
+    if (!node) continue;
+    try {
+      node.source.stop();
+    } catch {
+      // Already stopped.
     }
-  });
+    node.source.disconnect();
+    node.gain.disconnect();
+    delete nodes[kind];
+  }
+
+  if (ctx) {
+    try {
+      ctx.close();
+    } catch {
+      // Ignore.
+    }
+    ctx = null;
+  }
+
+  unlocked = false;
+  unlocking = false;
 }
